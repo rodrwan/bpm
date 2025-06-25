@@ -1,0 +1,9 @@
+[package]
+name = "bpm"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+symphonia = { version = "0.5", features = ["aiff"] }
+realfft = "3"
+rustfft = "6"
