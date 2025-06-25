@@ -79,7 +79,7 @@ impl BpmDetector {
         let file = File::open(path).map_err(|_| BpmError::FileNotFound(path.to_string()))?;
         let mss = MediaSourceStream::new(Box::new(file), Default::default());
 
-        // Configurar hint con la extensión del archivo para mejor detección de formato
+        // Configure hint with file extension for better format detection
         let mut hint = Hint::new();
         if let Some(extension) = std::path::Path::new(path).extension() {
             if let Some(ext_str) = extension.to_str() {
@@ -187,11 +187,11 @@ impl BpmDetector {
             return Err(BpmError::InsufficientData);
         }
 
-        // Normalizar energías
+        // Normalize energies
         let max_energy = energies.iter().fold(0.0_f32, |a, &b| a.max(b));
         let normalized: Vec<f32> = energies.iter().map(|&e| e / max_energy).collect();
 
-        // Calcular autocorrelación
+        // Calculate autocorrelation
         let seconds_per_frame = self.config.hop_size as f32 / sample_rate as f32;
         let min_frames = (self.config.min_bpm / self.config.max_bpm / seconds_per_frame).round() as usize;
         let max_frames = (self.config.max_bpm / self.config.min_bpm / seconds_per_frame).round() as usize;
@@ -212,7 +212,7 @@ impl BpmDetector {
             }
         }
 
-        // Encontrar picos
+        // Select best BPM (prefer higher if magnitudes are similar)
         let mut peaks = vec![];
         for i in 1..autocorr.len() - 1 {
             if autocorr[i] > self.config.autocorr_threshold
@@ -224,7 +224,7 @@ impl BpmDetector {
 
         peaks.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
-        // Convertir a BPM
+        // Convert to BPM
         let mut candidates = vec![];
         for (lag, magnitude) in peaks.iter().take(5) {
             let interval = *lag as f32 * seconds_per_frame;
@@ -241,7 +241,7 @@ impl BpmDetector {
             });
         }
 
-        // Seleccionar mejor BPM (preferir más alto si magnitudes similares)
+        // Select best BPM (prefer higher if magnitudes are similar)
         let (bpm1, mag1) = candidates[0];
         let (best_bpm, _) = if candidates.len() >= 2 {
             let (bpm2, mag2) = candidates[1];
