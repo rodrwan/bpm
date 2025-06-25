@@ -13,8 +13,8 @@ const FFT_SIZE: usize = 2048;
 const HOP_SIZE: usize = FFT_SIZE / 2;
 const MIN_BPM: f32 = 60.0;
 const MAX_BPM: f32 = 180.0;
-const MIN_FREQUENCY: f32 = 40.0;
-const MAX_FREQUENCY: f32 = 200.0;
+const MIN_FREQUENCY: f32 = 50.0;
+const MAX_FREQUENCY: f32 = 1000.0;
 
 fn analyze_bpm(energies: Vec<f32>, sample_rate: u32, hop_size: usize) -> Option<f32> {
     if energies.len() < 3 {
@@ -28,7 +28,7 @@ fn analyze_bpm(energies: Vec<f32>, sample_rate: u32, hop_size: usize) -> Option<
     // Calcular autocorrelación
     let seconds_per_frame = hop_size as f32 / sample_rate as f32;
     let min_frames = (MIN_BPM / MAX_BPM / seconds_per_frame).round() as usize;
-    let max_frames = (MIN_BPM / MIN_BPM / seconds_per_frame).round() as usize;
+    let max_frames = (MAX_BPM / MIN_BPM / seconds_per_frame).round() as usize;
 
     let mut autocorr = vec![0.0; max_frames];
 
@@ -88,20 +88,42 @@ fn analyze_bpm(energies: Vec<f32>, sample_rate: u32, hop_size: usize) -> Option<
 
 fn main() {
     let file_path = env::args().nth(1).expect("No file path given");
-    let file = File::open(file_path).unwrap();
+    let file = File::open(&file_path).unwrap_or_else(|_| {
+        eprintln!("Error: No se pudo abrir el archivo '{}'", file_path);
+        std::process::exit(1);
+    });
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
-    let hint = Hint::new();
+
+    // Configurar hint con la extensión del archivo para mejor detección de formato
+    let mut hint = Hint::new();
+    if let Some(extension) = std::path::Path::new(&file_path).extension() {
+        if let Some(ext_str) = extension.to_str() {
+            hint.with_extension(ext_str);
+        }
+    }
 
     let probed = symphonia::default::get_probe()
         .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
-        .unwrap();
+        .unwrap_or_else(|_| {
+            eprintln!("Error: Formato de audio no soportado");
+            std::process::exit(1);
+        });
     let mut format = probed.format;
-    let track = format.default_track().unwrap();
+    let track = format.default_track().unwrap_or_else(|| {
+        eprintln!("Error: No se encontró una pista de audio");
+        std::process::exit(1);
+    });
     let mut decoder = symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())
-        .unwrap();
+        .unwrap_or_else(|_| {
+            eprintln!("Error: Codec no soportado");
+            std::process::exit(1);
+        });
 
-    let sample_rate = track.codec_params.sample_rate.unwrap();
+    let sample_rate = track.codec_params.sample_rate.unwrap_or_else(|| {
+        eprintln!("Error: No se pudo obtener la tasa de muestreo");
+        std::process::exit(1);
+    });
 
     let mut planner = RealFftPlanner::<f32>::new();
     let r2c = planner.plan_fft_forward(FFT_SIZE);
@@ -112,7 +134,10 @@ fn main() {
     let mut energies = vec![];
 
     while let Ok(packet) = format.next_packet() {
-        let decoded = decoder.decode(&packet).unwrap();
+        let decoded = decoder.decode(&packet).unwrap_or_else(|_| {
+            eprintln!("Error: No se pudo decodificar el paquete de audio");
+            std::process::exit(1);
+        });
         match decoded {
             symphonia::core::audio::AudioBufferRef::F32(buf) => {
                 for frame_idx in 0..buf.frames() {

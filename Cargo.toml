@@ -1,9 +1,18 @@
 [package]
-name = "bpm"
+name = "bpm-detector"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "bpm_detector"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bpm"
+path = "src/main.rs"
+
 [dependencies]
 symphonia = { version = "0.5", features = ["aiff"] }
-realfft = "3"
-rustfft = "6"
+realfft = "3.5"
+rustfft = "6.4"
+thiserror = "1.0"
