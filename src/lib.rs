@@ -8,6 +8,14 @@ use realfft::RealFftPlanner;
 use rustfft::num_complex::Complex32;
 use std::fs::File;
 
+const FFT_SIZE: usize = 2048;
+const HOP_SIZE: usize = FFT_SIZE / 2;
+const MIN_BPM: f32 = 60.0;
+const MAX_BPM: f32 = 180.0;
+const MIN_FREQUENCY: f32 = 50.0;
+const MAX_FREQUENCY: f32 = 1000.0;
+const AUTOCORR_THRESHOLD: f32 = 0.05;
+
 pub struct BpmConfig {
     pub fft_size: usize,
     pub hop_size: usize,
@@ -21,13 +29,13 @@ pub struct BpmConfig {
 impl Default for BpmConfig {
     fn default() -> Self {
         Self {
-            fft_size: 2048,
-            hop_size: 1024,
-            min_frequency: 50.0,
-            max_frequency: 1000.0,
-            min_bpm: 60.0,
-            max_bpm: 180.0,
-            autocorr_threshold: 0.05,
+            fft_size: FFT_SIZE,
+            hop_size: HOP_SIZE,
+            min_frequency: MIN_FREQUENCY,
+            max_frequency: MAX_FREQUENCY,
+            min_bpm: MIN_BPM,
+            max_bpm: MAX_BPM,
+            autocorr_threshold: AUTOCORR_THRESHOLD,
         }
     }
 }
