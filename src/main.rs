@@ -8,29 +8,19 @@ use realfft::RealFftPlanner;
 use rustfft::num_complex::Complex32;
 use std::fs::File;
 
-fn analyze_bpm(grave_energies: Vec<f32>, sample_rate: u32, hop_size: usize) -> Option<f32> {
-    println!("Analizando {} frames de energía", grave_energies.len());
-    if grave_energies.len() < 3 {
-        println!("No hay suficientes datos para calcular BPM");
+fn analyze_bpm(energies: Vec<f32>, sample_rate: u32, hop_size: usize) -> Option<f32> {
+    if energies.len() < 3 {
         return None;
     }
 
-    // Normalizar las energías
-    let max_energy = grave_energies.iter().fold(0.0_f32, |a, &b| a.max(b));
-    let normalized_energies: Vec<f32> = grave_energies.iter()
-        .map(|&e| e / max_energy)
-        .collect();
+    // Normalizar energías
+    let max_energy = energies.iter().fold(0.0_f32, |a, &b| a.max(b));
+    let normalized: Vec<f32> = energies.iter().map(|&e| e / max_energy).collect();
 
-    // Calcular autocorrelación en el dominio de frames
+    // Calcular autocorrelación
     let seconds_per_frame = hop_size as f32 / sample_rate as f32;
-
-    // Rango de BPM: 60-180
-    let min_bpm = 60.0;
-    let max_bpm = 180.0;
-
-    // Convertir BPM a frames
-    let min_frames = (60.0 / max_bpm / seconds_per_frame).round() as usize;
-    let max_frames = (60.0 / min_bpm / seconds_per_frame).round() as usize;
+    let min_frames = (60.0 / 180.0 / seconds_per_frame).round() as usize; // 180 BPM
+    let max_frames = (60.0 / 60.0 / seconds_per_frame).round() as usize;  // 60 BPM
 
     let mut autocorr = vec![0.0; max_frames];
 
@@ -38,8 +28,8 @@ fn analyze_bpm(grave_energies: Vec<f32>, sample_rate: u32, hop_size: usize) -> O
         let mut sum = 0.0;
         let mut count = 0;
 
-        for i in 0..normalized_energies.len() - lag {
-            sum += normalized_energies[i] * normalized_energies[i + lag];
+        for i in 0..normalized.len() - lag {
+            sum += normalized[i] * normalized[i + lag];
             count += 1;
         }
 
@@ -48,71 +38,44 @@ fn analyze_bpm(grave_energies: Vec<f32>, sample_rate: u32, hop_size: usize) -> O
         }
     }
 
-    // Encontrar picos en la autocorrelación
+    // Encontrar picos
     let mut peaks = vec![];
-    let threshold = 0.05; // Umbral más bajo
-
     for i in 1..autocorr.len() - 1 {
-        if autocorr[i] > threshold
-            && autocorr[i] > autocorr[i - 1]
-            && autocorr[i] > autocorr[i + 1] {
+        if autocorr[i] > 0.05 && autocorr[i] > autocorr[i - 1] && autocorr[i] > autocorr[i + 1] {
             peaks.push((i, autocorr[i]));
         }
     }
 
-    // Ordenar picos por magnitud
     peaks.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
-    println!("Encontrados {} picos en autocorrelación", peaks.len());
-
-    // Convertir lags a BPM
-    let mut bpm_candidates = vec![];
-    for (lag, magnitude) in peaks.iter().take(10) {
-        let interval_secs = *lag as f32 * seconds_per_frame;
-        let bpm = 60.0 / interval_secs;
-
-        // Solo considerar BPMs en rango musical (60-180)
+    // Convertir a BPM
+    let mut candidates = vec![];
+    for (lag, magnitude) in peaks.iter().take(5) {
+        let interval = *lag as f32 * seconds_per_frame;
+        let bpm = 60.0 / interval;
         if bpm >= 60.0 && bpm <= 180.0 {
-            bpm_candidates.push((bpm, *magnitude));
+            candidates.push((bpm, *magnitude));
         }
     }
 
-    if bpm_candidates.is_empty() {
-        println!("No se encontraron candidatos de BPM válidos");
+    if candidates.is_empty() {
         return None;
     }
 
-    // Mostrar candidatos
-    println!("Candidatos de BPM (top 5):");
-    for (i, (bpm, magnitude)) in bpm_candidates.iter().take(5).enumerate() {
-        println!("  {}. {:.1} BPM (magnitud: {:.3})", i + 1, bpm, magnitude);
-    }
-
-    // Seleccionar el mejor BPM
-    let (best_bpm, best_magnitude) = if bpm_candidates.len() >= 2 {
-        let (bpm1, mag1) = bpm_candidates[0];
-        let (bpm2, mag2) = bpm_candidates[1];
-
-        // Si las magnitudes son similares (diferencia < 10%), preferir el BPM más alto
-        if (mag1 - mag2).abs() / mag1 < 0.1 {
-            if bpm1 > bpm2 {
-                (bpm1, mag1)
-            } else {
-                (bpm2, mag2)
-            }
+    // Seleccionar mejor BPM (preferir más alto si magnitudes similares)
+    let (bpm1, mag1) = candidates[0];
+    let (best_bpm, _) = if candidates.len() >= 2 {
+        let (bpm2, mag2) = candidates[1];
+        if (mag1 - mag2).abs() / mag1 < 0.1 && bpm2 > bpm1 {
+            (bpm2, mag2)
         } else {
             (bpm1, mag1)
         }
     } else {
-        bpm_candidates[0]
+        (bpm1, mag1)
     };
 
-    // Redondear a valores musicales típicos
-    let rounded_bpm = (best_bpm * 2.0_f32).round() / 2.0;
-
-    println!("BPM seleccionado: {:.1} (magnitud: {:.3})", rounded_bpm, best_magnitude);
-
-    Some(rounded_bpm)
+    Some((best_bpm * 2.0).round() / 2.0)
 }
 
 fn main() {
@@ -140,92 +103,82 @@ fn main() {
     let mut spectrum = r2c.make_output_vec();
 
     let mut frame = vec![];
-    let mut grave_energies = vec![];
+    let mut energies = vec![];
 
     while let Ok(packet) = format.next_packet() {
         let decoded = decoder.decode(&packet).unwrap();
         match decoded {
             symphonia::core::audio::AudioBufferRef::F32(buf) => {
-                let num_channels = buf.spec().channels.count();
                 for frame_idx in 0..buf.frames() {
-                    let mut sample = 0.0;
-                    for ch in 0..num_channels {
-                        sample += buf.chan(ch)[frame_idx];
-                    }
-                    sample /= num_channels as f32;
+                    let sample = buf.chan(0)[frame_idx];
                     frame.push(sample);
                     if frame.len() >= fft_size {
                         input.copy_from_slice(&frame[..fft_size]);
                         r2c.process(&mut input, &mut spectrum).unwrap();
+
                         let bin_freq = sample_rate as f32 / fft_size as f32;
                         let low_bin = (40.0 / bin_freq).round() as usize;
                         let high_bin = (150.0 / bin_freq).round() as usize;
+
                         let energy: f32 = spectrum[low_bin..high_bin]
                             .iter()
                             .map(|c: &Complex32| c.norm_sqr())
                             .sum();
-                        grave_energies.push(energy);
+
+                        energies.push(energy);
                         frame.drain(..hop_size);
                     }
                 }
             }
             symphonia::core::audio::AudioBufferRef::S16(buf) => {
-                let num_channels = buf.spec().channels.count();
                 for frame_idx in 0..buf.frames() {
-                    let mut sample = 0.0;
-                    for ch in 0..num_channels {
-                        sample += buf.chan(ch)[frame_idx] as f32 / i16::MAX as f32;
-                    }
-                    sample /= num_channels as f32;
+                    let sample = buf.chan(0)[frame_idx] as f32 / i16::MAX as f32;
                     frame.push(sample);
                     if frame.len() >= fft_size {
                         input.copy_from_slice(&frame[..fft_size]);
                         r2c.process(&mut input, &mut spectrum).unwrap();
+
                         let bin_freq = sample_rate as f32 / fft_size as f32;
                         let low_bin = (40.0 / bin_freq).round() as usize;
                         let high_bin = (150.0 / bin_freq).round() as usize;
+
                         let energy: f32 = spectrum[low_bin..high_bin]
                             .iter()
                             .map(|c: &Complex32| c.norm_sqr())
                             .sum();
-                        grave_energies.push(energy);
+
+                        energies.push(energy);
                         frame.drain(..hop_size);
                     }
                 }
             }
             symphonia::core::audio::AudioBufferRef::U8(buf) => {
-                let num_channels = buf.spec().channels.count();
                 for frame_idx in 0..buf.frames() {
-                    let mut sample = 0.0;
-                    for ch in 0..num_channels {
-                        sample += (buf.chan(ch)[frame_idx] as f32 - 128.0) / 128.0;
-                    }
-                    sample /= num_channels as f32;
+                    let sample = (buf.chan(0)[frame_idx] as f32 - 128.0) / 128.0;
                     frame.push(sample);
                     if frame.len() >= fft_size {
                         input.copy_from_slice(&frame[..fft_size]);
                         r2c.process(&mut input, &mut spectrum).unwrap();
+
                         let bin_freq = sample_rate as f32 / fft_size as f32;
                         let low_bin = (40.0 / bin_freq).round() as usize;
                         let high_bin = (150.0 / bin_freq).round() as usize;
+
                         let energy: f32 = spectrum[low_bin..high_bin]
                             .iter()
                             .map(|c: &Complex32| c.norm_sqr())
                             .sum();
-                        grave_energies.push(energy);
+
+                        energies.push(energy);
                         frame.drain(..hop_size);
                     }
                 }
             }
-            _ => {
-                println!("Formato de buffer no soportado");
-                continue;
-            }
+            _ => continue,
         }
     }
 
-    // Analizar BPM
-    if let Some(bpm) = analyze_bpm(grave_energies, sample_rate, hop_size) {
+    if let Some(bpm) = analyze_bpm(energies, sample_rate, hop_size) {
         println!("BPM estimado: {:.1}", bpm);
     } else {
         println!("No se pudo calcular el BPM");
