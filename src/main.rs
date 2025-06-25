@@ -9,6 +9,13 @@ use realfft::RealFftPlanner;
 use rustfft::num_complex::Complex32;
 use std::fs::File;
 
+const FFT_SIZE: usize = 2048;
+const HOP_SIZE: usize = FFT_SIZE / 2;
+const MIN_BPM: f32 = 60.0;
+const MAX_BPM: f32 = 180.0;
+const MIN_FREQUENCY: f32 = 40.0;
+const MAX_FREQUENCY: f32 = 200.0;
+
 fn analyze_bpm(energies: Vec<f32>, sample_rate: u32, hop_size: usize) -> Option<f32> {
     if energies.len() < 3 {
         return None;
@@ -20,8 +27,8 @@ fn analyze_bpm(energies: Vec<f32>, sample_rate: u32, hop_size: usize) -> Option<
 
     // Calcular autocorrelación
     let seconds_per_frame = hop_size as f32 / sample_rate as f32;
-    let min_frames = (60.0 / 180.0 / seconds_per_frame).round() as usize; // 180 BPM
-    let max_frames = (60.0 / 60.0 / seconds_per_frame).round() as usize;  // 60 BPM
+    let min_frames = (MIN_BPM / MAX_BPM / seconds_per_frame).round() as usize;
+    let max_frames = (MIN_BPM / MIN_BPM / seconds_per_frame).round() as usize;
 
     let mut autocorr = vec![0.0; max_frames];
 
@@ -53,8 +60,8 @@ fn analyze_bpm(energies: Vec<f32>, sample_rate: u32, hop_size: usize) -> Option<
     let mut candidates = vec![];
     for (lag, magnitude) in peaks.iter().take(5) {
         let interval = *lag as f32 * seconds_per_frame;
-        let bpm = 60.0 / interval;
-        if bpm >= 60.0 && bpm <= 180.0 {
+        let bpm = MIN_BPM / interval;
+        if bpm >= MIN_BPM && bpm <= MAX_BPM {
             candidates.push((bpm, *magnitude));
         }
     }
@@ -95,11 +102,9 @@ fn main() {
         .unwrap();
 
     let sample_rate = track.codec_params.sample_rate.unwrap();
-    let fft_size = 2048;
-    let hop_size = fft_size / 2;
 
     let mut planner = RealFftPlanner::<f32>::new();
-    let r2c = planner.plan_fft_forward(fft_size);
+    let r2c = planner.plan_fft_forward(FFT_SIZE);
     let mut input = r2c.make_input_vec();
     let mut spectrum = r2c.make_output_vec();
 
@@ -113,13 +118,13 @@ fn main() {
                 for frame_idx in 0..buf.frames() {
                     let sample = buf.chan(0)[frame_idx];
                     frame.push(sample);
-                    if frame.len() >= fft_size {
-                        input.copy_from_slice(&frame[..fft_size]);
+                    if frame.len() >= FFT_SIZE {
+                        input.copy_from_slice(&frame[..FFT_SIZE]);
                         r2c.process(&mut input, &mut spectrum).unwrap();
 
-                        let bin_freq = sample_rate as f32 / fft_size as f32;
-                        let low_bin = (40.0 / bin_freq).round() as usize;
-                        let high_bin = (150.0 / bin_freq).round() as usize;
+                        let bin_freq = sample_rate as f32 / FFT_SIZE as f32;
+                        let low_bin = (MIN_FREQUENCY / bin_freq).round() as usize;
+                        let high_bin = (MAX_FREQUENCY / bin_freq).round() as usize;
 
                         let energy: f32 = spectrum[low_bin..high_bin]
                             .iter()
@@ -127,7 +132,7 @@ fn main() {
                             .sum();
 
                         energies.push(energy);
-                        frame.drain(..hop_size);
+                        frame.drain(..HOP_SIZE);
                     }
                 }
             }
@@ -135,13 +140,13 @@ fn main() {
                 for frame_idx in 0..buf.frames() {
                     let sample = buf.chan(0)[frame_idx] as f32 / i16::MAX as f32;
                     frame.push(sample);
-                    if frame.len() >= fft_size {
-                        input.copy_from_slice(&frame[..fft_size]);
+                    if frame.len() >= FFT_SIZE {
+                        input.copy_from_slice(&frame[..FFT_SIZE]);
                         r2c.process(&mut input, &mut spectrum).unwrap();
 
-                        let bin_freq = sample_rate as f32 / fft_size as f32;
-                        let low_bin = (40.0 / bin_freq).round() as usize;
-                        let high_bin = (150.0 / bin_freq).round() as usize;
+                        let bin_freq = sample_rate as f32 / FFT_SIZE as f32;
+                        let low_bin = (MIN_FREQUENCY / bin_freq).round() as usize;
+                        let high_bin = (MAX_FREQUENCY / bin_freq).round() as usize;
 
                         let energy: f32 = spectrum[low_bin..high_bin]
                             .iter()
@@ -149,7 +154,7 @@ fn main() {
                             .sum();
 
                         energies.push(energy);
-                        frame.drain(..hop_size);
+                        frame.drain(..HOP_SIZE);
                     }
                 }
             }
@@ -157,13 +162,13 @@ fn main() {
                 for frame_idx in 0..buf.frames() {
                     let sample = (buf.chan(0)[frame_idx] as f32 - 128.0) / 128.0;
                     frame.push(sample);
-                    if frame.len() >= fft_size {
-                        input.copy_from_slice(&frame[..fft_size]);
+                    if frame.len() >= FFT_SIZE {
+                        input.copy_from_slice(&frame[..FFT_SIZE]);
                         r2c.process(&mut input, &mut spectrum).unwrap();
 
-                        let bin_freq = sample_rate as f32 / fft_size as f32;
-                        let low_bin = (40.0 / bin_freq).round() as usize;
-                        let high_bin = (150.0 / bin_freq).round() as usize;
+                        let bin_freq = sample_rate as f32 / FFT_SIZE as f32;
+                        let low_bin = (MIN_FREQUENCY / bin_freq).round() as usize;
+                        let high_bin = (MAX_FREQUENCY / bin_freq).round() as usize;
 
                         let energy: f32 = spectrum[low_bin..high_bin]
                             .iter()
@@ -171,7 +176,7 @@ fn main() {
                             .sum();
 
                         energies.push(energy);
-                        frame.drain(..hop_size);
+                        frame.drain(..HOP_SIZE);
                     }
                 }
             }
@@ -179,7 +184,7 @@ fn main() {
         }
     }
 
-    if let Some(bpm) = analyze_bpm(energies, sample_rate, hop_size) {
+    if let Some(bpm) = analyze_bpm(energies, sample_rate, HOP_SIZE) {
         println!("BPM estimado: {:.1}", bpm);
     } else {
         println!("No se pudo calcular el BPM");
