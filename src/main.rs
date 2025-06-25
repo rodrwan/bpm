@@ -1,3 +1,4 @@
+use std::env;
 use symphonia::core::codecs::DecoderOptions;
 use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
@@ -79,8 +80,8 @@ fn analyze_bpm(energies: Vec<f32>, sample_rate: u32, hop_size: usize) -> Option<
 }
 
 fn main() {
-    let path = "Electricano - Decisions (Original Mix).aiff";
-    let file = File::open(path).unwrap();
+    let file_path = env::args().nth(1).expect("No file path given");
+    let file = File::open(file_path).unwrap();
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
     let hint = Hint::new();
 
